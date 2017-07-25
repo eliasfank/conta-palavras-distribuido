@@ -10,6 +10,9 @@ from multiprocessing.pool import ThreadPool
 import multiprocessing
 
 def sendFile(host, port, fp, s):
+	SOMA = {}
+	for w in PALAVRAS.split(','):
+		SOMA[w] = 0
 	print fp
 	###Function that manages the sending of the file to the server
 	m = s.recv(1024)
@@ -38,14 +41,14 @@ def sendFile(host, port, fp, s):
 				print totalValue, '\n'
 				totalValue = totalValue.split(",")
 				for i, w in enumerate(PALAVRAS.split(',')):
-					SOMA_MESTRE[w] += int(totalValue[i])
+					SOMA[w] += int(totalValue[i])
 			else:
 				print "Failed to upload file. Try again?"
 			s.close()
 		except Exception as msg:
 			print("Error message: "+str(msg))
 			return False
-		return True
+		return SOMA
 	elif (m=="ERROR"):
 		print "Error: An unexpected error has occoured at the server side. Try again?"
 		return False
@@ -103,32 +106,30 @@ def getFile(con):
 		print("Error message: "+str(msg))
 	return
 
-def enviarArquivoParaTodos(hosts):
-	for i, x in enumerate(hosts):
-		filePath = "parte"+str(i+1)+".txt"
-		x = x.split(":")
-		host = x[0]
-		port = x[1]
-		#Create a socket that use IPV4 and TCP protocol
-		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		#If the file exists
-		#Start the connection with the server
-		if (os.path.exists(filePath)):
-			try:
-				s.connect((host, int(port)))
-				print "Connected to server!"
-			except socket.error as sem:
-				print "ERROR: Couldn't connect."
-				print sem 
-				sys.exit()
-
-			##Send a message that signals the start of the file upload
-			s.send("GETFILE")
-			sendFile(host, port, filePath, s)
-
-		else:
-			print("File does not exists.")
+def enviarArquivoParaContar(host, filePath, result):
+	x = host.split(":")
+	host = x[0]
+	port = x[1]
+	#Create a socket that use IPV4 and TCP protocol
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	#If the file exists
+	#Start the connection with the server
+	if (os.path.exists(filePath)):
+		try:
+			s.connect((host, int(port)))
+			print "Connected to server!"
+		except socket.error as sem:
+			print "ERROR: Couldn't connect."
+			print sem 
 			sys.exit()
+
+		##Send a message that signals the start of the file upload
+		s.send("GETFILE")
+		result.put({host: sendFile(host, port, filePath, s)})
+
+	else:
+		print("File does not exists.")
+		sys.exit()
 
 def n_parts(string, n):
 	if n == 0: 
@@ -190,16 +191,17 @@ except:
 	usage()
 
 sep = [' ','-','.',',','\n','\r']
-porta = ''
-PALAVRAS = 'and,or'
-SOMA_MESTRE = {'and': 0, 'or': 0}
+PALAVRAS = 'and,or,house,yes,no,good,bad,by,other'
+SOMA_MESTRE = {'127.0.0.1:8008':{'and':0, 'or':0, 'house':0, 'yes':0, 'no':0,'good':0,'bad':0,'by':0,'other':0}}
+SOMA_FINAL = {'and':0, 'or':0, 'house':0, 'yes':0, 'no':0,'good':0,'bad':0,'by':0,'other':0}
+
 
 if modo == "server":
 	###Create a socket that use IPV4 and TCP protocol
 	###Bind the port for this process conections
 	###Set the maximun number of queued connections
 	tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	orig = ('', 0)
+	orig = ('', 8008)
 	try:
 	    tcp.bind(orig)
 	    print "Bind succesfull!"
@@ -228,11 +230,31 @@ if modo == "server":
 if modo == 'cliente':
 	input_string = open(arq_name, 'r').read()
 	partes_arquivo = n_parts(input_string, len(enderecos)+1)
+	ini = time.time()
 	for i, p in enumerate(partes_arquivo):
 		text_file = open("parte"+str(i)+".txt", "w")
 		text_file.write(p)
 		text_file.close()
-	enviarArquivoParaTodos(enderecos)
+	thread_list = []
+	result_queue = multiprocessing.Queue()
+	for i in range(0, len(enderecos)):
+		t = multiprocessing.Process(target=enviarArquivoParaContar, args=(enderecos[i], 'parte'+str(i+1)+'.txt', result_queue))
+		thread_list.append(t)
+
+	for thread in thread_list:
+		thread.start()
+
+	for i, thread in enumerate(thread_list):
+		thread.join()
+		SOMA_MESTRE.update( result_queue.get())
+
 	for w in PALAVRAS.split(','):
-		SOMA_MESTRE[w]+=contaPalavras('parte0.txt', w, 3)
-	print "TUDO", SOMA_MESTRE
+		SOMA_MESTRE['127.0.0.1:8008'][w]+=contaPalavras('parte0.txt', w, 3)
+		
+	for k,v in SOMA_MESTRE.iteritems():
+		for w in PALAVRAS.split(','):
+			SOMA_FINAL[w]+=v[w]
+	fim = time.time()
+	print "TUDO:", SOMA_FINAL
+	print "TEMPO:", fim-ini
+	
