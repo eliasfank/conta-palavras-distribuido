@@ -30,12 +30,15 @@ def sendFile(host, port, fp, s):
 			l = s.recv(1024)
 			#If the file has been uploaded successfully
 			#Get the total value from the products of the uploaded file
-			if (l=="SUCCESS"): 
+			if (l=="SUCCESS_FILE"): 
 				print "Succesfully uploaded file."
+				s.send(PALAVRAS)
 				totalValue = s.recv(1024)
 				print "\nTotal de palavras contadas pelo "+host+':'+port+':'
 				print totalValue, '\n'
-				SOMA_MESTRE.append(int(totalValue))
+				totalValue = totalValue.split(",")
+				for i, w in enumerate(PALAVRAS.split(',')):
+					SOMA_MESTRE[w] += int(totalValue[i])
 			else:
 				print "Failed to upload file. Try again?"
 			s.close()
@@ -63,43 +66,46 @@ def conectado(con, cliente):
 def getFile(con):
 	###Function that get the client file
 
-    ###generate a unique name to the file
-    ##The file will be save on RecievedFiles/
-    fileName = str(con.getsockname()[1])+'File.txt' 
-    try:
-        ###Save the file on the server directory
-        #######################################################
-        file = open(fileName, 'wb')
-        con.send("READY")
-        print "Downloading file..."
-        while True:
-            d = con.recv(4096)
-            if (d=="--END--"):
-                file.close()
-                break
-            file.write(d)
-        con.send("SUCCESS")
-        print "Succesfully downloaded file as "+fileName 
-        #######################################################
+	###generate a unique name to the file
+	##The file will be save on RecievedFiles/
+	fileName = str(con.getsockname()[1])+'File.txt' 
+	try:
+		###Save the file on the server directory
+		#######################################################
+		file = open(fileName, 'wb')
+		con.send("READY")
+		print "Downloading file..."
+		while True:
+			d = con.recv(4096)
+			if (d=="--END--"):
+				file.close()
+				break
+			file.write(d)
+		con.send("SUCCESS_FILE")
+		print "Succesfully downloaded file as "+fileName 
+		words = con.recv(1024).split(',')
+		#######################################################
 
-        ###Calculate the total value from the products and send
-        ##the value to the client##############################
-        qtWord = contaPalavras(fileName, 'and', 4)
-        con.send(str(qtWord))
-        #######################################################
+		###Calculate the total value from the products and send
+		##the value to the client##############################
+		contagem = []
+		for w in words:
+			contagem.append(contaPalavras(fileName, w, 3))
+		con.send(''.join([str(x)+',' if i != len(contagem)-1 else str(x) for i, x in enumerate(contagem)]))
+		#######################################################
 
-        ###After it all, close the connection with the client
-        con.close()
+		###After it all, close the connection with the client
+		con.close()
 
-    except Exception as msg:
-        con.send("ERROR")
-        #File Error.
-        print("Error message: "+str(msg))
-        return
+	except Exception as msg:
+		con.send("ERROR")
+		#File Error.
+		print("Error message: "+str(msg))
+	return
 
 def enviarArquivoParaTodos(hosts):
 	for i, x in enumerate(hosts):
-		filePath = "parte"+str(i)+".txt"
+		filePath = "parte"+str(i+1)+".txt"
 		x = x.split(":")
 		host = x[0]
 		port = x[1]
@@ -185,7 +191,8 @@ except:
 
 sep = [' ','-','.',',','\n','\r']
 porta = ''
-SOMA_MESTRE = []
+PALAVRAS = 'and,or'
+SOMA_MESTRE = {'and': 0, 'or': 0}
 
 if modo == "server":
 	###Create a socket that use IPV4 and TCP protocol
@@ -220,10 +227,12 @@ if modo == "server":
 	    sys.exit()  
 if modo == 'cliente':
 	input_string = open(arq_name, 'r').read()
-	partes_arquivo = n_parts(input_string, len(enderecos))
+	partes_arquivo = n_parts(input_string, len(enderecos)+1)
 	for i, p in enumerate(partes_arquivo):
 		text_file = open("parte"+str(i)+".txt", "w")
 		text_file.write(p)
 		text_file.close()
 	enviarArquivoParaTodos(enderecos)
-	print "TUDO", sum(SOMA_MESTRE)
+	for w in PALAVRAS.split(','):
+		SOMA_MESTRE[w]+=contaPalavras('parte0.txt', w, 3)
+	print "TUDO", SOMA_MESTRE
