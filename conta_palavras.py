@@ -9,15 +9,14 @@ from math import ceil as ceil
 from multiprocessing.pool import ThreadPool
 import multiprocessing
 
-def sendFile(host, port, fp, s):
+def sendFile(host, port, fp, palavras, s):
 	SOMA = {}
-	for w in PALAVRAS.split(','):
+	for w in palavras.split(','):
 		SOMA[w] = 0
-	print fp
 	###Function that manages the sending of the file to the server
 	m = s.recv(1024)
 	if (m=="READY"):
-		print "Sending file to "+host+":"+str(port)
+		#print "Sending file to "+host+":"+str(port)
 		try:
 			f = open(fp, 'rb')
 			d = f.read(4096)
@@ -34,13 +33,13 @@ def sendFile(host, port, fp, s):
 			#If the file has been uploaded successfully
 			#Get the total value from the products of the uploaded file
 			if (l=="SUCCESS_FILE"): 
-				print "Succesfully uploaded file."
-				s.send(PALAVRAS)
+				#print "Succesfully uploaded file."
+				s.send(palavras)
 				totalValue = s.recv(1024)
-				print "\nTotal de palavras contadas pelo "+host+':'+port+':'
-				print totalValue, '\n'
+				#print "\nTotal de palavras contadas pelo "+host+':'+port+':'
+				#print totalValue, '\n'
 				totalValue = totalValue.split(",")
-				for i, w in enumerate(PALAVRAS.split(',')):
+				for i, w in enumerate(palavras.split(',')):
 					SOMA[w] += int(totalValue[i])
 			else:
 				print "Failed to upload file. Try again?"
@@ -106,7 +105,7 @@ def getFile(con):
 		print("Error message: "+str(msg))
 	return
 
-def enviarArquivoParaContar(host, filePath, result):
+def enviarArquivoParaContar(host, filePath, palavras, result):
 	x = host.split(":")
 	host = x[0]
 	port = x[1]
@@ -117,7 +116,7 @@ def enviarArquivoParaContar(host, filePath, result):
 	if (os.path.exists(filePath)):
 		try:
 			s.connect((host, int(port)))
-			print "Connected to server!"
+			#print "Connected to server!"
 		except socket.error as sem:
 			print "ERROR: Couldn't connect."
 			print sem 
@@ -125,7 +124,7 @@ def enviarArquivoParaContar(host, filePath, result):
 
 		##Send a message that signals the start of the file upload
 		s.send("GETFILE")
-		result.put({host: sendFile(host, port, filePath, s)})
+		result.put({host: sendFile(host, port, filePath, palavras, s)})
 
 	else:
 		print("File does not exists.")
@@ -176,11 +175,19 @@ def contaPalavras(fileName, word, n_threads):
 
 	return sum(total_count)
 
-def contarNoCliente(fileName, result):
+def contarNoCliente(fileName, palavras, result):
 	retorno = {}
-	for w in PALAVRAS.split(','):
+	for w in palavras.split(','):
 		retorno[w] = contaPalavras(fileName, w, LOCAL_THREADS)
 	result.put({'127.0.0.1:8008': retorno})
+
+def quebraArquivoEmPartes(arquivo, qt_partes):
+	input_string = open(arquivo, 'r').read()
+	partes_arquivo = n_parts(input_string, qt_partes)
+	for i, p in enumerate(partes_arquivo):
+		text_file = open("parte_"+str(i)+"_de_"+str(qt_partes)+"_do_"+arquivo, "w")
+		text_file.write(p)
+		text_file.close()
 
 def usage():
 	print("Como usar:")
@@ -189,18 +196,17 @@ def usage():
 
 
 try:
-	arq_name = sys.argv[1]
-	modo = sys.argv[2]
-	enderecos = sys.argv[3:]
+	modo = sys.argv[1]
 except:
 	usage()
 
-LOCAL_THREADS = 3
+LOCAL_THREADS = 7
 sep = [' ','-','.',',','\n','\r']
-PALAVRAS = 'and,or,house,yes,no,good,bad,by,other'
-SOMA_MESTRE = {'127.0.0.1:8008':{'and':0, 'or':0, 'house':0, 'yes':0, 'no':0,'good':0,'bad':0,'by':0,'other':0}}
-SOMA_FINAL = {'and':0, 'or':0, 'house':0, 'yes':0, 'no':0,'good':0,'bad':0,'by':0,'other':0}
-
+PALAVRAS = 'and,or,house,yes,no,good,bad,by'
+enderecos = ['127.0.0.1:8008', '127.0.0.1:8008', '127.0.0.1:8008', '127.0.0.1:8008', '127.0.0.1:8008', '127.0.0.1:8008', '127.0.0.1:8008', '127.0.0.1:8008']
+arquivos = ['book.in']
+numeros_maquinas = [0,4,8]
+qtWords = [1,2,4,8]
 
 if modo == "server":
 	###Create a socket that use IPV4 and TCP protocol
@@ -234,38 +240,46 @@ if modo == "server":
 	    tcp.close()
 	    sys.exit()  
 if modo == 'cliente':
-	input_string = open(arq_name, 'r').read()
-	partes_arquivo = n_parts(input_string, len(enderecos)+1)
-	ini = time.time()
-	for i, p in enumerate(partes_arquivo):
-		text_file = open("parte"+str(i)+".txt", "w")
-		text_file.write(p)
-		text_file.close()
-	thread_list = []
-	result_queue = multiprocessing.Queue()
-	result_queue_client = multiprocessing.Queue()
-	for i in range(0, len(enderecos)):
-		t = multiprocessing.Process(target=enviarArquivoParaContar, args=(enderecos[i], 'parte'+str(i+1)+'.txt', result_queue))
-		thread_list.append(t)
+	for arquivo in arquivos:
+		for qtw in qtWords:
+			subsetPALAVRAS = ''.join([x+',' if i != len(PALAVRAS.split(',')[:qtw])-1 else x for i, x in enumerate(PALAVRAS.split(',')[:qtw])])
+			for x in numeros_maquinas:
+				SOMA_MESTRE = {}
+				SOMA_FINAL = {}
+				for w in subsetPALAVRAS.split(','):
+					SOMA_FINAL[w] = 0
+				enders = enderecos[:x]
+				quebraArquivoEmPartes(arquivo, x+1)
+				ini = time.time()
+				thread_list = []
+				result_queue = multiprocessing.Queue()
+				result_queue_client = multiprocessing.Queue()
+				for i in range(0, len(enders)):
+					t = multiprocessing.Process(target=enviarArquivoParaContar, args=(enders[i], "parte_"+str(i+1)+"_de_"+str(x+1)+"_do_"+arquivo, subsetPALAVRAS,result_queue))
+					thread_list.append(t)
 
-	for thread in thread_list:
-		thread.start()
-	
-	client_thread = multiprocessing.Process(target=contarNoCliente, args=('parte0.txt', result_queue_client))
-	client_thread.start()
+				for thread in thread_list:
+					thread.start()
+				
+				client_thread = multiprocessing.Process(target=contarNoCliente, args=("parte_0_de_"+str(x+1)+"_do_"+arquivo, subsetPALAVRAS, result_queue_client))
+				client_thread.start()
 
-	for i, thread in enumerate(thread_list):
-		thread.join()
-		SOMA_MESTRE.update(result_queue.get())
+				for i, thread in enumerate(thread_list):
+					thread.join()
+					SOMA_MESTRE.update(result_queue.get())
 
-	client_thread.join()
+				client_thread.join()
 
-	SOMA_MESTRE.update(result_queue_client.get())
-		
-	for k,v in SOMA_MESTRE.iteritems():
-		for w in PALAVRAS.split(','):
-			SOMA_FINAL[w]+=v[w]
-	fim = time.time()
-	print "TUDO:", SOMA_FINAL
-	print "TEMPO:", fim-ini
+				SOMA_MESTRE.update(result_queue_client.get())
+					
+				for k,v in SOMA_MESTRE.iteritems():
+					for w in subsetPALAVRAS.split(','):
+						SOMA_FINAL[w]+=v[w]
+				fim = time.time()
+
+				print "\nExecutado no cliente e mais", x, "maquinas"
+				print "Arquivo:", arquivo
+				print "Palavras:", subsetPALAVRAS
+				print "Tempo:", fim-ini
+				print "Resultado:", SOMA_FINAL
 	
