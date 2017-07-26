@@ -93,7 +93,7 @@ def getFile(con):
 		##the value to the client##############################
 		contagem = []
 		for w in words:
-			contagem.append(contaPalavras(fileName, w, 3))
+			contagem.append(contaPalavras(fileName, w, LOCAL_THREADS))
 		con.send(''.join([str(x)+',' if i != len(contagem)-1 else str(x) for i, x in enumerate(contagem)]))
 		#######################################################
 
@@ -172,10 +172,15 @@ def contaPalavras(fileName, word, n_threads):
 	for thread in thread_list:
 		thread.join()
 		total_count.append(result_queue.get())
-		print "Thread:", total_count[-1]
+		#print "Thread:", total_count[-1]
 
 	return sum(total_count)
 
+def contarNoCliente(fileName, result):
+	retorno = {}
+	for w in PALAVRAS.split(','):
+		retorno[w] = contaPalavras(fileName, w, LOCAL_THREADS)
+	result.put({'127.0.0.1:8008': retorno})
 
 def usage():
 	print("Como usar:")
@@ -190,6 +195,7 @@ try:
 except:
 	usage()
 
+LOCAL_THREADS = 3
 sep = [' ','-','.',',','\n','\r']
 PALAVRAS = 'and,or,house,yes,no,good,bad,by,other'
 SOMA_MESTRE = {'127.0.0.1:8008':{'and':0, 'or':0, 'house':0, 'yes':0, 'no':0,'good':0,'bad':0,'by':0,'other':0}}
@@ -237,19 +243,24 @@ if modo == 'cliente':
 		text_file.close()
 	thread_list = []
 	result_queue = multiprocessing.Queue()
+	result_queue_client = multiprocessing.Queue()
 	for i in range(0, len(enderecos)):
 		t = multiprocessing.Process(target=enviarArquivoParaContar, args=(enderecos[i], 'parte'+str(i+1)+'.txt', result_queue))
 		thread_list.append(t)
 
 	for thread in thread_list:
 		thread.start()
+	
+	client_thread = multiprocessing.Process(target=contarNoCliente, args=('parte0.txt', result_queue_client))
+	client_thread.start()
 
 	for i, thread in enumerate(thread_list):
 		thread.join()
-		SOMA_MESTRE.update( result_queue.get())
+		SOMA_MESTRE.update(result_queue.get())
 
-	for w in PALAVRAS.split(','):
-		SOMA_MESTRE['127.0.0.1:8008'][w]+=contaPalavras('parte0.txt', w, 3)
+	client_thread.join()
+
+	SOMA_MESTRE.update(result_queue_client.get())
 		
 	for k,v in SOMA_MESTRE.iteritems():
 		for w in PALAVRAS.split(','):
